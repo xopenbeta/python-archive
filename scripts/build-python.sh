@@ -18,7 +18,8 @@ mkdir -p "$DIST_DIR"
 
 # 检测操作系统和架构
 OS_TYPE="$(uname -s)"
-ARCH="$(uname -m)"
+# 允许通过环境变量覆盖 ARCH
+ARCH="${TARGET_ARCH:-$(uname -m)}"
 
 echo "Operating System: $OS_TYPE"
 echo "Architecture: $ARCH"
@@ -119,6 +120,13 @@ case "$OS_TYPE" in
         
         if [ "$PYTHON_MAJOR" = "2" ]; then
             # Python 2.7: 尝试使用 build.bat
+            # Python 2.7 主要是 x64 支持，ARM64 对于 2.7 可能不支持或非常困难
+            # 这里保持 x64 硬编码，或仅在 TARGET_ARCH 为 x64 时运行
+            if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "amd64" ]; then
+                echo "Error: Python 2.7 on Windows supports x64 only (mostly due to VS2008 requirement)"
+                exit 1
+            fi
+            
             echo "Running: build.bat -e -p x64"
             cmd.exe //c "build.bat -e -p x64" || {
                 echo ""
@@ -138,9 +146,17 @@ case "$OS_TYPE" in
             BUILD_OUTPUT="amd64"
         else
             # Python 3 构建
-            echo "Running: build.bat -e -p x64 -c Release"
-            cmd.exe //c "build.bat -e -p x64 -c Release"
+            # 根据 ARCH 设置 -p 参数
+            WIN_PLATFORM="x64"
             BUILD_OUTPUT="amd64"
+            
+            if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+                WIN_PLATFORM="ARM64"
+                BUILD_OUTPUT="arm64"
+            fi
+            
+            echo "Running: build.bat -e -p $WIN_PLATFORM -c Release"
+            cmd.exe //c "build.bat -e -p $WIN_PLATFORM -c Release"
         fi
         
         cd ..

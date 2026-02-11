@@ -16,24 +16,95 @@ permissions:
 
 jobs:
   build-python:
-    name: Build Python ${{ matrix.python_version }} on ${{ matrix.os }}
+    name: Build ${{ matrix.python_version }} on ${{ matrix.os-name }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python_version: ['2.7.18', '3.13.1']
-        # 排除 Windows + Python 2.7 的组合（需要 VS 2008）
-        exclude:
-          - os: windows-latest
+        include:
+          # --- Linux x64 ---
+          - os: ubuntu-latest
+            os-name: 'linux'
+            arch: x86_64
             python_version: '2.7.18'
-        
+          - os: ubuntu-latest
+            os-name: 'linux'
+            arch: x86_64
+            python_version: '3.13.1'
+            
+          # --- Linux ARM64 (using QEMU/emulation) ---
+          - os: ubuntu-latest
+            os-name: 'linux'
+            arch: aarch64
+            python_version: '2.7.18'
+          - os: ubuntu-latest
+            os-name: 'linux'
+            arch: aarch64
+            python_version: '3.13.1'
+            
+          # --- macOS x64 (Intel) ---
+          - os: macos-13  # macOS 13 on GitHub is Intel
+            os-name: 'macos'
+            arch: x86_64
+            python_version: '2.7.18'
+          - os: macos-13
+            os-name: 'macos'
+            arch: x86_64
+            python_version: '3.13.1'
+            
+          # --- macOS ARM64 (Apple Silicon) ---
+          - os: macos-14  # macOS 14+ on GitHub is ARM64 (M1)
+            os-name: 'macos'
+            arch: arm64
+            python_version: '2.7.18'
+          - os: macos-14
+            os-name: 'macos'
+            arch: arm64
+            python_version: '3.13.1'
+            
+          # --- Windows x64 ---
+          - os: windows-latest
+            os-name: 'windows'
+            arch: x86_64
+            python_version: '3.13.1'
+            
+          # --- Windows ARM64 (Cross-compile) ---
+          - os: windows-latest
+            os-name: 'windows'
+            arch: arm64
+            python_version: '3.13.1'
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+      # --- Linux ARM64 Handling (via uraimo/run-on-arch-action) ---
+      - name: Build on Linux ARM64
+        if: matrix.os-name == 'linux' && matrix.arch == 'aarch64'
+        uses: uraimo/run-on-arch-action@v2
+        id: build_arm64
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          # Mount workspace to persist build artifacts from container to host
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update
+            apt-get install -y build-essential libssl-dev zlib1g-dev \
+              libncurses5-dev libncursesw5-dev libreadline-dev libsqlite3-dev \
+              libgdbm-dev libdb5.3-dev libbz2-dev libexpat1-dev liblzma-dev \
+              tk-dev libffi-dev wget
+          run: |
+            bash ./scripts/build-python.sh ${{ matrix.python_version }}
+            
+            # Pack manually inside container because 'runner.os' outside is still Linux x64
+            cd dist
+            tar czf python-${{ matrix.python_version }}-linux-aarch64.tar.gz python-${{ matrix.python_version }}/
+
+      # --- Standard Setup & Build (Non-ARM64-Linux) ---
+      
+      - name: Set up dependencies (Linux x64)
+        if: matrix.os-name == 'linux' && matrix.arch == 'x86_64'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libssl-dev zlib1g-dev \
@@ -42,12 +113,9 @@ jobs:
             tk-dev libffi-dev wget
 
       - name: Set up dependencies (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.os-name == 'macos'
         run: |
-          # 安装通用依赖
           brew install readline sqlite3 xz zlib tcl-tk
-          
-          # Python 2.7 需要 openssl@1.1，Python 3 需要 openssl@3
           if [[ "${{ matrix.python_version }}" == 2.* ]]; then
             brew install openssl@1.1
           else
@@ -55,37 +123,35 @@ jobs:
           fi
 
       - name: Set up dependencies (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.os-name == 'windows'
         shell: bash
         run: |
-          # GitHub Actions Windows runner 已预装 Visual Studio
-          # 显示可用的 VS 版本（使用 bash 兼容命令）
-          which msbuild.exe || where.exe msbuild || echo "MSBuild not found in PATH"
-          
-          # 对于 Python 2.7，可能需要安装额外的工具
-          if [[ "${{ matrix.python_version }}" == 2.* ]]; then
-            echo "Building Python 2.7 - using available VS tools"
-          fi
+          which msbuild.exe || where.exe msbuild || echo "MSBuild not found"
 
-      - name: Build Python ${{ matrix.python_version }}
+      - name: Build Python (Native/Standard)
+        if: "! (matrix.os-name == 'linux' && matrix.arch == 'aarch64')"
         shell: bash
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
         run: |
           bash ./scripts/build-python.sh ${{ matrix.python_version }}
 
-      - name: Create archive
+      - name: Create archive (Native/Standard)
+        if: "! (matrix.os-name == 'linux' && matrix.arch == 'aarch64')"
         shell: bash
         run: |
           cd dist
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a python-${{ matrix.python_version }}-windows-${{ runner.arch }}.zip python-${{ matrix.python_version }}/
+          if [ "${{ matrix.os-name }}" = "windows" ]; then
+            7z a python-${{ matrix.python_version }}-windows-${{ matrix.arch }}.zip python-${{ matrix.python_version }}/
           else
-            tar czf python-${{ matrix.python_version }}-${{ runner.os }}-${{ runner.arch }}.tar.gz python-${{ matrix.python_version }}/
+            # Use matrix.arch explicitly
+            tar czf python-${{ matrix.python_version }}-${{ matrix.os-name }}-${{ matrix.arch }}.tar.gz python-${{ matrix.python_version }}/
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-${{ matrix.python_version }}-${{ matrix.os }}-${{ runner.arch }}
+          name: python-${{ matrix.python_version }}-${{ matrix.os-name }}-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.zip
@@ -134,9 +200,9 @@ jobs:
           - Python 3.13.1 (最新的 Python 3 稳定版)
           
           ## Platforms
-          - Linux (x86_64, ARM64)
-          - macOS (x86_64, ARM64)
-          - Windows (x86_64)
+          - Linux (x86_64, aarch64)
+          - macOS (x86_64, arm64)
+          - Windows (x86_64, arm64)
           
           ## Usage
           Download the appropriate archive for your platform and extract it:
