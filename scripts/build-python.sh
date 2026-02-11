@@ -60,10 +60,11 @@ case "$OS_TYPE" in
         # $ORIGIN 是特殊变量，表示可执行文件所在目录
         CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared --with-lto"
         # 使用 --enable-shared 时必须指定 RPATH
-        # 使用 $ORIGIN 使其可移植（相对路径）
-        # Correctly escape $ORIGIN for configure -> Makefile -> shell -> compiler
-        # We need the compiler to receive: -Wl,-rpath=$ORIGIN/../lib
-        CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS='-Wl,-rpath=\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib'"
+        # 使用 env var 传递 LDFLAGS 更安全，避免通过 argument 传递时的 shell 引用地狱
+        # 我们需要 configure 看到的 value 是: -Wl,-rpath=\$$ORIGIN/../lib
+        # 这样生成的 Makefile 中是: LDFLAGS = ... -Wl,-rpath=\$$ORIGIN/../lib
+        # shell 执行 gcc 时会转义 \$ 为 $，于是 linker 收到: -rpath=$ORIGIN/../lib
+        export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
         if [ "$PYTHON_MAJOR" = "3" ]; then
             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-ssl"
         fi
