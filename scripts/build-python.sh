@@ -182,6 +182,37 @@ case "$OS_TYPE" in
         ;;
 esac
 
+# Python 2.7 在 macOS 上的特殊修复：修补 configure 脚本
+if [ "$PYTHON_MAJOR" = "2" ] && [ "$OS_TYPE" = "Darwin" ]; then
+    echo "Applying macOS compatibility patches for Python 2.7..."
+    
+    # 修复 'arch' 命令检测问题
+    # Python 2.7 的 configure 脚本期望 'arch' 返回特定格式，但新版 macOS 格式不同
+    if [ -f "configure" ]; then
+        # 备份原始 configure
+        cp configure configure.orig
+        
+        # 修复方法1：修补 configure 脚本中检测 arch 的代码
+        # 查找并替换导致问题的 arch 检查
+        if grep -q "Unexpected output of 'arch' on OSX" configure; then
+            echo "Patching arch detection in configure script..."
+            # 替换 arch 检测逻辑，使其接受任何 arch 输出
+            sed -i.bak '/Unexpected output of .arch. on OSX/,+2d' configure
+        fi
+        
+        # 修复方法2：设置环境变量以绕过某些检查
+        echo "Setting compatibility environment variables..."
+        export ac_cv_have_long_long_format=yes
+        
+        # 修复方法3：在 macOS 上明确设置 ARCHFLAGS
+        if [ "$ARCH" = "x86_64" ]; then
+            export ARCHFLAGS="-arch x86_64"
+        elif [ "$ARCH" = "arm64" ]; then
+            export ARCHFLAGS="-arch arm64"
+        fi
+    fi
+fi
+
 # 编译
 echo "Building Python (this may take a while)..."
 echo "Configure options: $CONFIGURE_OPTS"
@@ -207,11 +238,15 @@ if [ "$OS_TYPE" = "Darwin" ] && [ "${USE_FRAMEWORK:-0}" = "0" ]; then
     # 手动创建 python/python3 链接（altinstall 不创建）
     if [ "$PYTHON_MAJOR" = "3" ]; then
         cd "$INSTALL_DIR/bin"
-        if [ ! -e "python3" ]; then
-            ln -s python3.* python3 2>/dev/null || true
+        # 查找实际安装的 python 可执行文件（如 python3.13）
+        PYTHON_VERSIONED=$(ls python3.* 2>/dev/null | head -n1)
+        if [ -n "$PYTHON_VERSIONED" ] && [ ! -e "python3" ]; then
+            echo "Creating python3 symlink to $PYTHON_VERSIONED"
+            ln -s "$PYTHON_VERSIONED" python3
         fi
         if [ ! -e "python" ]; then
-            ln -s python3 python 2>/dev/null || true
+            echo "Creating python symlink to python3"
+            ln -s python3 python
         fi
         cd -
     fi

@@ -53,10 +53,11 @@ jobs:
 
       - name: Set up dependencies (Windows)
         if: runner.os == 'Windows'
+        shell: bash
         run: |
           # GitHub Actions Windows runner 已预装 Visual Studio
-          # 显示可用的 VS 版本
-          where msbuild || echo "MSBuild not found in PATH"
+          # 显示可用的 VS 版本（使用 bash 兼容命令）
+          which msbuild.exe || where.exe msbuild || echo "MSBuild not found in PATH"
           
           # 对于 Python 2.7，可能需要安装额外的工具
           if [[ "${{ matrix.python_version }}" == 2.* ]]; then
