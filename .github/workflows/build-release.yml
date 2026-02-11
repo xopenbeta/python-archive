@@ -20,6 +20,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python_version: ['2.7.18', '3.13.1']
+        # 排除 Windows + Python 2.7 的组合（需要 VS 2008）
+        exclude:
+          - os: windows-latest
+            python_version: '2.7.18'
         
     steps:
       - name: Checkout code
@@ -37,13 +41,27 @@ jobs:
       - name: Set up dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install openssl readline sqlite3 xz zlib tcl-tk
+          # 安装通用依赖
+          brew install readline sqlite3 xz zlib tcl-tk
+          
+          # Python 2.7 需要 openssl@1.1，Python 3 需要 openssl@3
+          if [[ "${{ matrix.python_version }}" == 2.* ]]; then
+            brew install openssl@1.1
+          else
+            brew install openssl@3
+          fi
 
       - name: Set up dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install -y visualstudio2022buildtools
-          choco install -y visualstudio2022-workload-vctools
+          # GitHub Actions Windows runner 已预装 Visual Studio
+          # 显示可用的 VS 版本
+          where msbuild || echo "MSBuild not found in PATH"
+          
+          # 对于 Python 2.7，可能需要安装额外的工具
+          if [[ "${{ matrix.python_version }}" == 2.* ]]; then
+            echo "Building Python 2.7 - using available VS tools"
+          fi
 
       - name: Build Python ${{ matrix.python_version }}
         shell: bash

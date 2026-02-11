@@ -55,16 +55,44 @@ CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
 # 针对不同操作系统的特殊配置
 case "$OS_TYPE" in
     Linux*)
+        # 使用 RPATH 确保可执行文件能找到共享库
+        # $ORIGIN 是特殊变量，表示可执行文件所在目录
         CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared --with-lto"
+        # 使用 --enable-shared 时必须指定 RPATH
+        # 使用 $ORIGIN 使其可移植（相对路径）
+        CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS=-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
         if [ "$PYTHON_MAJOR" = "3" ]; then
             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-ssl"
         fi
         ;;
     Darwin*)
         # macOS specific options
-        CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-framework=$INSTALL_DIR"
-        if [ "$PYTHON_MAJOR" = "3" ]; then
-            # 查找 OpenSSL
+        
+        # 在 CI 环境中使用 shared 库构建，避免需要 /Applications 权限
+        # 本地开发可以设置 USE_FRAMEWORK=1 使用 framework 构建
+        if [ "${USE_FRAMEWORK:-0}" = "1" ] && [ "$PYTHON_MAJOR" = "3" ]; then
+            CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-framework=$INSTALL_DIR"
+            echo "Using framework build (requires /Applications access)"
+        else
+            CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared"
+            # macOS 上使用 @loader_path 代替 $ORIGIN，需要转义
+            CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS=-Wl,-rpath,@loader_path/../lib"
+            echo "Using shared library build (CI-friendly)"
+        fi
+        
+        if [ "$PYTHON_MAJOR" = "2" ]; then
+            # Python 2.7 需要特殊处理
+            # 禁用 toolbox-glue 避免 'arch' 命令问题
+            CONFIGURE_OPTS="$CONFIGURE_OPTS --disable-toolbox-glue"
+            
+            # 查找 OpenSSL（Python 2.7 使用 openssl@1.1）
+            if [ -d "/usr/local/opt/openssl@1.1" ]; then
+                CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/usr/local/opt/openssl@1.1"
+            elif [ -d "/opt/homebrew/opt/openssl@1.1" ]; then
+                CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/opt/homebrew/opt/openssl@1.1"
+            fi
+        else
+            # 查找 OpenSSL (Python 3)
             if [ -d "/usr/local/opt/openssl@3" ]; then
                 CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/usr/local/opt/openssl@3"
             elif [ -d "/opt/homebrew/opt/openssl@3" ]; then
@@ -75,20 +103,76 @@ case "$OS_TYPE" in
     MINGW*|MSYS*|CYGWIN*)
         # Windows build using MSBuild
         echo "Building Python on Windows..."
-        cd PCbuild
+        
+        # Python 2.7 在 Windows 上需要 Visual Studio 2008，在现代 CI 环境中很难构建
         if [ "$PYTHON_MAJOR" = "2" ]; then
-            ./build.bat -e -p x64
-        else
-            ./build.bat -e -p x64 -c Release
+            echo "========================================"
+            echo "WARNING: Python 2.7 Windows builds are not officially supported"
+            echo "Python 2.7.18 requires Visual Studio 2008 which is not available on modern CI runners"
+            echo "========================================"
+            echo ""
+            echo "Attempting to build anyway with available tools..."
+            echo ""
         fi
+        
+        cd PCbuild
+        
+        if [ "$PYTHON_MAJOR" = "2" ]; then
+            # Python 2.7: 尝试使用 build.bat
+            echo "Running: build.bat -e -p x64"
+            cmd.exe //c "build.bat -e -p x64" || {
+                echo ""
+                echo "========================================"
+                echo "ERROR: Python 2.7 build failed"
+                echo "This is expected on GitHub Actions Windows runners"
+                echo "Python 2.7 requires Visual Studio 2008"
+                echo "========================================"
+                
+                # 列出可用文件用于调试
+                echo ""
+                echo "Available files in PCbuild:"
+                ls -la || dir
+                
+                exit 1
+            }
+            BUILD_OUTPUT="amd64"
+        else
+            # Python 3 构建
+            echo "Running: build.bat -e -p x64 -c Release"
+            cmd.exe //c "build.bat -e -p x64 -c Release"
+            BUILD_OUTPUT="amd64"
+        fi
+        
         cd ..
         
-        # 复制构建结果
-        if [ "$PYTHON_MAJOR" = "2" ]; then
-            cp -r PCbuild/amd64 "$INSTALL_DIR"
-        else
-            cp -r PCbuild/amd64 "$INSTALL_DIR"
+        # 检查构建输出是否存在
+        if [ ! -d "PCbuild/$BUILD_OUTPUT" ]; then
+            echo "Error: Build output directory PCbuild/$BUILD_OUTPUT not found"
+            echo "Looking for alternative paths..."
+            echo ""
+            echo "Contents of PCbuild directory:"
+            ls -la PCbuild/ || dir PCbuild\
+            
+            # 尝试其他可能的输出路径
+            if [ -d "PCbuild/win32" ]; then
+                echo "Found win32 build"
+                BUILD_OUTPUT="win32"
+            elif [ -d "PCbuild/x64" ]; then
+                echo "Found x64 build"
+                BUILD_OUTPUT="x64"
+            else
+                echo "Error: Could not find any build output directory"
+                exit 1
+            fi
         fi
+        
+        # 创建安装目录并复制构建结果
+        mkdir -p "$INSTALL_DIR"
+        echo "Copying build artifacts from PCbuild/$BUILD_OUTPUT to $INSTALL_DIR"
+        cp -r PCbuild/$BUILD_OUTPUT/* "$INSTALL_DIR/" || {
+            echo "Error: Failed to copy build artifacts"
+            exit 1
+        }
         
         echo "Python $PYTHON_VERSION built successfully for Windows"
         exit 0
@@ -100,6 +184,7 @@ esac
 
 # 编译
 echo "Building Python (this may take a while)..."
+echo "Configure options: $CONFIGURE_OPTS"
 ./configure $CONFIGURE_OPTS
 
 # 使用多核编译
@@ -113,7 +198,39 @@ make -j"$NPROC"
 
 # 安装
 echo "Installing Python..."
-make install
+if [ "$OS_TYPE" = "Darwin" ] && [ "${USE_FRAMEWORK:-0}" = "0" ]; then
+    # shared 库构建：使用 altinstall 避免安装到 /Applications
+    # altinstall 不会安装 Python.app 和 Python Launcher.app
+    echo "Using 'make altinstall' (CI-friendly, skips /Applications)"
+    make altinstall
+    
+    # 手动创建 python/python3 链接（altinstall 不创建）
+    if [ "$PYTHON_MAJOR" = "3" ]; then
+        cd "$INSTALL_DIR/bin"
+        if [ ! -e "python3" ]; then
+            ln -s python3.* python3 2>/dev/null || true
+        fi
+        if [ ! -e "python" ]; then
+            ln -s python3 python 2>/dev/null || true
+        fi
+        cd -
+    fi
+else
+    # Framework 构建或其他平台使用常规安装
+    make install
+fi
+
+# 对于 Linux/macOS shared 构建，确保运行时能找到共享库
+if [ "$OS_TYPE" = "Linux" ] || [ "$OS_TYPE" = "Darwin" ]; then
+    # 临时设置 LD_LIBRARY_PATH/DYLD_LIBRARY_PATH 用于后续命令
+    if [ "$OS_TYPE" = "Linux" ]; then
+        export LD_LIBRARY_PATH="$INSTALL_DIR/lib:${LD_LIBRARY_PATH:-}"
+        echo "Set LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+    else
+        export DYLD_LIBRARY_PATH="$INSTALL_DIR/lib:${DYLD_LIBRARY_PATH:-}"
+        echo "Set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH"
+    fi
+fi
 
 # 对于 Python 3，安装 pip
 if [ "$PYTHON_MAJOR" = "3" ]; then
@@ -128,6 +245,23 @@ if [ "$PYTHON_MAJOR" = "2" ]; then
     "$INSTALL_DIR/bin/python2" --version
 else
     "$INSTALL_DIR/bin/python3" --version
+fi
+
+# 检查 RPATH 设置（调试用）
+if [ "$OS_TYPE" = "Linux" ]; then
+    echo "Checking RPATH configuration..."
+    if [ "$PYTHON_MAJOR" = "2" ]; then
+        readelf -d "$INSTALL_DIR/bin/python2" | grep -i rpath || echo "No RPATH found"
+    else
+        readelf -d "$INSTALL_DIR/bin/python3" | grep -i rpath || echo "No RPATH found"
+    fi
+elif [ "$OS_TYPE" = "Darwin" ]; then
+    echo "Checking RPATH configuration..."
+    if [ "$PYTHON_MAJOR" = "2" ]; then
+        otool -l "$INSTALL_DIR/bin/python2" | grep -A 2 LC_RPATH || echo "No RPATH found"
+    else
+        otool -l "$INSTALL_DIR/bin/python3" | grep -A 2 LC_RPATH || echo "No RPATH found"
+    fi
 fi
 
 # 创建符号链接
@@ -148,7 +282,33 @@ Python Version: $PYTHON_VERSION
 Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 Operating System: $OS_TYPE
 Architecture: $ARCH
+Build Type: Portable with embedded RPATH
 EOF
+
+# 为 Linux/macOS 创建使用说明
+if [ "$OS_TYPE" = "Linux" ] || [ "$OS_TYPE" = "Darwin" ]; then
+    cat > "$INSTALL_DIR/README.txt" << 'EOF'
+# Portable Python Distribution
+
+This is a portable Python distribution with embedded RPATH.
+It can be moved anywhere and does not require system installation.
+
+## Usage
+
+Direct execution:
+    ./bin/python --version
+    ./bin/pip --version
+
+Add to PATH (optional):
+    export PATH="$(pwd)/bin:$PATH"
+
+## Notes
+
+- All shared libraries are included in the lib/ directory
+- RPATH is configured to find libraries relative to the executable
+- No need to set LD_LIBRARY_PATH or DYLD_LIBRARY_PATH manually
+EOF
+fi
 
 echo "=========================================="
 echo "Python $PYTHON_VERSION built successfully!"
