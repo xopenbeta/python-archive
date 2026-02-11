@@ -43,7 +43,7 @@ jobs:
             python_version: '3.13.1'
             
           # --- macOS x64 (Intel) ---
-          - os: macos-13  # macOS 13 on GitHub is Intel
+          - os: macos-13
             os-name: 'macos'
             arch: x86_64
             python_version: '2.7.18'
@@ -53,11 +53,11 @@ jobs:
             python_version: '3.13.1'
             
           # --- macOS ARM64 (Apple Silicon) ---
-          - os: macos-14  # macOS 14+ on GitHub is ARM64 (M1)
+          - os: macos-latest # Currently macos-14
             os-name: 'macos'
             arch: arm64
             python_version: '2.7.18'
-          - os: macos-14
+          - os: macos-latest
             os-name: 'macos'
             arch: arm64
             python_version: '3.13.1'

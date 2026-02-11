@@ -61,7 +61,9 @@ case "$OS_TYPE" in
         CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared --with-lto"
         # 使用 --enable-shared 时必须指定 RPATH
         # 使用 $ORIGIN 使其可移植（相对路径）
-        CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS=-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
+        # Correctly escape $ORIGIN for configure -> Makefile -> shell -> compiler
+        # We need the compiler to receive: -Wl,-rpath=$ORIGIN/../lib
+        CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS='-Wl,-rpath=\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib'"
         if [ "$PYTHON_MAJOR" = "3" ]; then
             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-ssl"
         fi
@@ -234,7 +236,34 @@ fi
 # 编译
 echo "Building Python (this may take a while)..."
 echo "Configure options: $CONFIGURE_OPTS"
-./configure $CONFIGURE_OPTS
+
+# Pre-check compiler to debug "C compiler cannot create executables"
+echo "Checking compiler basic functionality..."
+echo 'int main() { return 0; }' > test_compile.c
+if gcc test_compile.c -o test_compile; then
+    echo "Compiler basic check passed."
+    rm -f test_compile test_compile.c
+else
+    echo "Compiler basic check FAILED."
+    echo "GCC Version:"
+    gcc --version
+    rm -f test_compile.c
+    # Do not exit, let configure fail and show log
+fi
+
+if ! ./configure $CONFIGURE_OPTS; then
+    echo "=========================================="
+    echo "CONFIGURE FAILED"
+    echo "=========================================="
+    
+    if [ -f config.log ]; then
+        echo "Tailing config.log (last 100 lines):"
+        tail -n 100 config.log
+    else
+        echo "config.log not found!"
+    fi
+    exit 1
+fi
 
 # 使用多核编译
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
