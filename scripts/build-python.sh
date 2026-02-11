@@ -197,7 +197,9 @@ if [ "$PYTHON_MAJOR" = "2" ] && [ "$OS_TYPE" = "Darwin" ]; then
         if grep -q "Unexpected output of 'arch' on OSX" configure; then
             echo "Patching arch detection in configure script..."
             # 替换 arch 检测逻辑，使其接受任何 arch 输出
-            sed -i.bak '/Unexpected output of .arch. on OSX/,+2d' configure
+            # fix: The previous patch deleted lines which caused syntax error (missing esac)
+            # New patch replaces the error call with a default arch assignment, preserving structure
+            sed -i.bak "/Unexpected output of .arch. on OSX/s/as_fn_error.*/MACOSX_DEFAULT_ARCH=\"$ARCH\"/" configure
         fi
         
         # 修复方法2：设置环境变量以绕过某些检查
@@ -271,7 +273,8 @@ fi
 if [ "$PYTHON_MAJOR" = "3" ]; then
     echo "Installing pip..."
     "$INSTALL_DIR/bin/python3" -m ensurepip
-    "$INSTALL_DIR/bin/pip3" install --upgrade pip setuptools wheel
+    # use python -m pip instead of calling pip3 directly to avoid "No such file or directory" errors
+    "$INSTALL_DIR/bin/python3" -m pip install --upgrade pip setuptools wheel
 fi
 
 # 验证安装
