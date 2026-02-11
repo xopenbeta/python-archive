@@ -1,0 +1,11 @@
+build/
+dist/
+*.tar.gz
+*.zip
+*.pyc
+*.pyo
+__pycache__/
+.DS_Store
+*.log
+.vscode/
+.idea/
