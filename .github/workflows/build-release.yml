@@ -11,6 +11,9 @@ on:
         required: true
         default: 'latest'
 
+permissions:
+  contents: write
+
 jobs:
   build-python:
     name: Build Python ${{ matrix.python_version }} on ${{ matrix.os }}
