@@ -251,6 +251,17 @@ if [ "$OS_TYPE" = "Darwin" ] && [ "${USE_FRAMEWORK:-0}" = "0" ]; then
             ln -s python3 python
         fi
         cd -
+    elif [ "$PYTHON_MAJOR" = "2" ]; then
+        cd "$INSTALL_DIR/bin"
+        if [ -f "python2.7" ] && [ ! -e "python2" ]; then
+            echo "Creating python2 symlink to python2.7"
+            ln -s python2.7 python2
+        fi
+        if [ ! -e "python" ]; then
+            echo "Creating python symlink to python2"
+            ln -s python2 python
+        fi
+        cd -
     fi
 else
     # Framework 构建或其他平台使用常规安装
