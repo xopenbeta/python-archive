@@ -43,11 +43,11 @@ jobs:
             python_version: '3.13.1'
             
           # --- macOS x64 (Intel) ---
-          - os: macos-13
+          - os: macos-12  # macOS 12 is reliably Intel x64
             os-name: 'macos'
             arch: x86_64
             python_version: '2.7.18'
-          - os: macos-13
+          - os: macos-12
             os-name: 'macos'
             arch: x86_64
             python_version: '3.13.1'
