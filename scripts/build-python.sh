@@ -53,18 +53,43 @@ cd "Python-$PYTHON_VERSION"
 echo "Configuring build..."
 CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
 
+# Special handling for Linux ARM64 Python 2.7 to avoid GCC segfaults in QEMU
+# "gcc: internal compiler error: Segmentation fault" happens with PGO/LTO enabled
+if [ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ] && [ "$PYTHON_MAJOR" = "2" ]; then
+    echo "NOTICE: Disabling PGO and LTO for Python 2.7 on Linux ARM64 to prevent compiler crash"
+    # Remove --enable-optimizations
+    CONFIGURE_OPTS="--prefix=$INSTALL_DIR"
+fi
+
 # 针对不同操作系统的特殊配置
 case "$OS_TYPE" in
     Linux*)
         # 使用 RPATH 确保可执行文件能找到共享库
         # $ORIGIN 是特殊变量，表示可执行文件所在目录
-        CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared --with-lto"
+        CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared"
+        
+        # 针对 Linux ARM64 的特殊处理：
+        # 1. 禁用激进的 LDFLAGS 转义，因为 python 3.13 的 configure 脚本在处理复杂引号时似乎更脆弱
+        # 2. Python 2.7 必须使用环境变量传递 LDFLAGS 来避免引号问题
+        # 3. 此处使用更简单的 LDFLAGS，避免过度转义问题
+        if [ "$ARCH" = "aarch64" ]; then
+            # 对于 ARM64 (QEMU)，简化 LDFLAGS，直接传递给 configure 
+            # 注意：在 QEMU 环境中，复杂的 Shell 转义容易出错
+            CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS=-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
+        else
+            # 对于 x86_64 原生环境，使用环境变量传递 LDFLAGS 更安全
+            export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
+        fi
+
+        # Enable LTO only if NOT (Linux ARM64 + Python 2.7)
+        if ! ([ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ] && [ "$PYTHON_MAJOR" = "2" ]); then
+             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-lto"
+        fi
+        
         # 使用 --enable-shared 时必须指定 RPATH
-        # 使用 env var 传递 LDFLAGS 更安全，避免通过 argument 传递时的 shell 引用地狱
-        # 我们需要 configure 看到的 value 是: -Wl,-rpath=\$$ORIGIN/../lib
-        # 这样生成的 Makefile 中是: LDFLAGS = ... -Wl,-rpath=\$$ORIGIN/../lib
-        # shell 执行 gcc 时会转义 \$ 为 $，于是 linker 收到: -rpath=$ORIGIN/../lib
-        export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
+        # 使用 $ORIGIN 使其可移植（相对路径）
+        # Correctly escape $ORIGIN for configure -> Makefile -> shell -> compiler
+        
         if [ "$PYTHON_MAJOR" = "3" ]; then
             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-ssl"
         fi

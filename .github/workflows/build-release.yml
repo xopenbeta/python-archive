@@ -43,11 +43,14 @@ jobs:
             python_version: '3.13.1'
             
           # --- macOS x64 (Intel) ---
-          - os: macos-12  # macOS 12 is reliably Intel x64
+          # GitHub Actions no longer provides macOS 12 (deprecated Dec 2024)
+          # We must use macos-13 (Intel 最后的堡垒)
+          # 如果 macos-13 调度慢，是因为它是仅存的 Intel 资源，需求量大
+          - os: macos-13
             os-name: 'macos'
             arch: x86_64
             python_version: '2.7.18'
-          - os: macos-12
+          - os: macos-13
             os-name: 'macos'
             arch: x86_64
             python_version: '3.13.1'
