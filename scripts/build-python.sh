@@ -59,6 +59,39 @@ if [ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ] && [ "$PYTHON_MAJOR" = "2
     echo "NOTICE: Disabling PGO and LTO for Python 2.7 on Linux ARM64 to prevent compiler crash"
     # Remove --enable-optimizations
     CONFIGURE_OPTS="--prefix=$INSTALL_DIR"
+    
+    # Pre-set configure cache variables via a config.cache file
+    # QEMU often fails to run configure test programs (AC_CHECK_SIZEOF etc.)
+    # because it cannot execute the compiled binaries properly.
+    # Using a cache file is the most reliable way to feed these values to old autoconf.
+    # These values are correct for Linux aarch64 (64-bit LP64).
+    echo "NOTICE: Creating configure cache file for QEMU aarch64 compatibility"
+    CACHE_FILE="$BUILD_DIR/Python-$PYTHON_VERSION/config.cache"
+    cat > "$CACHE_FILE" << 'CACHE_EOF'
+ac_cv_sizeof_pid_t=${ac_cv_sizeof_pid_t=4}
+ac_cv_sizeof_long=${ac_cv_sizeof_long=8}
+ac_cv_sizeof_int=${ac_cv_sizeof_int=4}
+ac_cv_sizeof_short=${ac_cv_sizeof_short=2}
+ac_cv_sizeof_float=${ac_cv_sizeof_float=4}
+ac_cv_sizeof_double=${ac_cv_sizeof_double=8}
+ac_cv_sizeof_fpos_t=${ac_cv_sizeof_fpos_t=16}
+ac_cv_sizeof_size_t=${ac_cv_sizeof_size_t=8}
+ac_cv_sizeof_void_p=${ac_cv_sizeof_void_p=8}
+ac_cv_sizeof_long_long=${ac_cv_sizeof_long_long=8}
+ac_cv_sizeof_off_t=${ac_cv_sizeof_off_t=8}
+ac_cv_sizeof_time_t=${ac_cv_sizeof_time_t=8}
+ac_cv_sizeof_pthread_t=${ac_cv_sizeof_pthread_t=8}
+ac_cv_sizeof_uintptr_t=${ac_cv_sizeof_uintptr_t=8}
+ac_cv_sizeof__Bool=${ac_cv_sizeof__Bool=1}
+ac_cv_sizeof_wchar_t=${ac_cv_sizeof_wchar_t=4}
+ac_cv_have_long_long_format=${ac_cv_have_long_long_format=yes}
+ac_cv_working_tzset=${ac_cv_working_tzset=yes}
+ac_cv_have_size_t_format=${ac_cv_have_size_t_format=yes}
+ac_cv_buggy_getaddrinfo=${ac_cv_buggy_getaddrinfo=no}
+ac_cv_file__dev_ptmx=${ac_cv_file__dev_ptmx=yes}
+ac_cv_file__dev_ptc=${ac_cv_file__dev_ptc=no}
+CACHE_EOF
+    CONFIGURE_OPTS="$CONFIGURE_OPTS --cache-file=$CACHE_FILE"
 fi
 
 # 针对不同操作系统的特殊配置
