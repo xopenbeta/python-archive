@@ -32,12 +32,12 @@ jobs:
             arch: x86_64
             python_version: '3.13.1'
             
-          # --- Linux ARM64 (using QEMU/emulation) ---
-          - os: ubuntu-latest
+          # --- Linux ARM64 (native ARM64 runner) ---
+          - os: ubuntu-24.04-arm
             os-name: 'linux'
             arch: aarch64
             python_version: '2.7.18'
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             os-name: 'linux'
             arch: aarch64
             python_version: '3.13.1'
@@ -80,33 +80,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- Linux ARM64 Handling (via uraimo/run-on-arch-action) ---
-      - name: Build on Linux ARM64
-        if: matrix.os-name == 'linux' && matrix.arch == 'aarch64'
-        uses: uraimo/run-on-arch-action@v2
-        id: build_arm64
-        with:
-          arch: aarch64
-          distro: ubuntu22.04
-          # Mount workspace to persist build artifacts from container to host
-          githubToken: ${{ github.token }}
-          install: |
-            apt-get update
-            apt-get install -y build-essential libssl-dev zlib1g-dev \
-              libncurses5-dev libncursesw5-dev libreadline-dev libsqlite3-dev \
-              libgdbm-dev libdb5.3-dev libbz2-dev libexpat1-dev liblzma-dev \
-              tk-dev libffi-dev wget
-          run: |
-            bash ./scripts/build-python.sh ${{ matrix.python_version }}
-            
-            # Pack manually inside container because 'runner.os' outside is still Linux x64
-            cd dist
-            tar czf python-${{ matrix.python_version }}-linux-aarch64.tar.gz python-${{ matrix.python_version }}/
-
-      # --- Standard Setup & Build (Non-ARM64-Linux) ---
+      # --- Standard Setup & Build ---
       
-      - name: Set up dependencies (Linux x64)
-        if: matrix.os-name == 'linux' && matrix.arch == 'x86_64'
+      - name: Set up dependencies (Linux)
+        if: matrix.os-name == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libssl-dev zlib1g-dev \
@@ -117,17 +94,30 @@ jobs:
       - name: Set up dependencies (macOS)
         if: matrix.os-name == 'macos'
         run: |
-          # 对于 x86_64 构建，先安装 Rosetta 2
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             echo "Installing Rosetta 2 for x86_64 emulation..."
             sudo softwareupdate --install-rosetta --agree-to-license || true
-          fi
-          
-          brew install readline sqlite3 xz zlib tcl-tk
-          if [[ "${{ matrix.python_version }}" == 2.* ]]; then
-            brew install openssl@1.1
+            
+            # 安装 x86_64 版本的 Homebrew（安装到 /usr/local）
+            echo "Installing x86_64 Homebrew..."
+            arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+            
+            # 用 x86_64 Homebrew 安装 x86_64 版本的依赖
+            BREW_X86="/usr/local/bin/brew"
+            arch -x86_64 $BREW_X86 install readline sqlite3 xz zlib tcl-tk
+            if [[ "${{ matrix.python_version }}" == 2.* ]]; then
+              arch -x86_64 $BREW_X86 install openssl@1.1
+            else
+              arch -x86_64 $BREW_X86 install openssl@3
+            fi
           else
-            brew install openssl@3
+            # ARM64 原生构建，使用默认 Homebrew
+            brew install readline sqlite3 xz zlib tcl-tk
+            if [[ "${{ matrix.python_version }}" == 2.* ]]; then
+              brew install openssl@1.1
+            else
+              brew install openssl@3
+            fi
           fi
 
       - name: Set up dependencies (Windows)
@@ -136,8 +126,7 @@ jobs:
         run: |
           which msbuild.exe || where.exe msbuild || echo "MSBuild not found"
 
-      - name: Build Python (Native/Standard)
-        if: "! (matrix.os-name == 'linux' && matrix.arch == 'aarch64')"
+      - name: Build Python
         shell: bash
         env:
           TARGET_ARCH: ${{ matrix.arch }}
@@ -150,8 +139,7 @@ jobs:
             bash ./scripts/build-python.sh ${{ matrix.python_version }}
           fi
 
-      - name: Create archive (Native/Standard)
-        if: "! (matrix.os-name == 'linux' && matrix.arch == 'aarch64')"
+      - name: Create archive
         shell: bash
         run: |
           cd dist

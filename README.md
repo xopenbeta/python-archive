@@ -32,10 +32,10 @@
 
 ```bash
 # 创建版本标签
-git tag -a v202602121122 -m "Release Python 2.7.18 and 3.13.1"
+git tag -a v202602121153 -m "Release Python 2.7.18 and 3.13.1"
 
 # 推送标签触发 CI/CD
-git push origin v202602121122
+git push origin v202602121153
 ```
 
 ### 方法 2: 手动触发

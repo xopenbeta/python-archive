@@ -57,75 +57,15 @@ CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
 echo "Configuring build..."
 CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
 
-# Special handling for Linux ARM64 to avoid GCC segfaults in QEMU
-# "gcc: internal compiler error: Segmentation fault" happens with PGO/LTO enabled
-# This affects BOTH Python 2 and Python 3 when compiled under QEMU aarch64 emulation
-if [ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ]; then
-    echo "NOTICE: Disabling PGO (--enable-optimizations) and LTO for Linux ARM64 (QEMU) to prevent compiler crash"
-    CONFIGURE_OPTS="--prefix=$INSTALL_DIR"
-    
-    if [ "$PYTHON_MAJOR" = "2" ]; then
-        # Pre-set configure cache variables via a config.cache file
-        # Python 2.7's old autoconf cannot run test programs under QEMU
-        echo "NOTICE: Creating configure cache file for QEMU aarch64 compatibility"
-        CACHE_FILE="$BUILD_DIR/Python-$PYTHON_VERSION/config.cache"
-        cat > "$CACHE_FILE" << 'CACHE_EOF'
-ac_cv_sizeof_pid_t=${ac_cv_sizeof_pid_t=4}
-ac_cv_sizeof_long=${ac_cv_sizeof_long=8}
-ac_cv_sizeof_int=${ac_cv_sizeof_int=4}
-ac_cv_sizeof_short=${ac_cv_sizeof_short=2}
-ac_cv_sizeof_float=${ac_cv_sizeof_float=4}
-ac_cv_sizeof_double=${ac_cv_sizeof_double=8}
-ac_cv_sizeof_fpos_t=${ac_cv_sizeof_fpos_t=16}
-ac_cv_sizeof_size_t=${ac_cv_sizeof_size_t=8}
-ac_cv_sizeof_void_p=${ac_cv_sizeof_void_p=8}
-ac_cv_sizeof_long_long=${ac_cv_sizeof_long_long=8}
-ac_cv_sizeof_off_t=${ac_cv_sizeof_off_t=8}
-ac_cv_sizeof_time_t=${ac_cv_sizeof_time_t=8}
-ac_cv_sizeof_pthread_t=${ac_cv_sizeof_pthread_t=8}
-ac_cv_sizeof_uintptr_t=${ac_cv_sizeof_uintptr_t=8}
-ac_cv_sizeof__Bool=${ac_cv_sizeof__Bool=1}
-ac_cv_sizeof_wchar_t=${ac_cv_sizeof_wchar_t=4}
-ac_cv_have_long_long_format=${ac_cv_have_long_long_format=yes}
-ac_cv_working_tzset=${ac_cv_working_tzset=yes}
-ac_cv_have_size_t_format=${ac_cv_have_size_t_format=yes}
-ac_cv_buggy_getaddrinfo=${ac_cv_buggy_getaddrinfo=no}
-ac_cv_file__dev_ptmx=${ac_cv_file__dev_ptmx=yes}
-ac_cv_file__dev_ptc=${ac_cv_file__dev_ptc=no}
-CACHE_EOF
-        CONFIGURE_OPTS="$CONFIGURE_OPTS --cache-file=$CACHE_FILE"
-    fi
-fi
-
 # 针对不同操作系统的特殊配置
 case "$OS_TYPE" in
     Linux*)
         # 使用 RPATH 确保可执行文件能找到共享库
         # $ORIGIN 是特殊变量，表示可执行文件所在目录
-        CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared"
-        
-        # 针对 Linux ARM64 的特殊处理：
-        # 1. 禁用激进的 LDFLAGS 转义，因为 python 3.13 的 configure 脚本在处理复杂引号时似乎更脆弱
-        # 2. Python 2.7 必须使用环境变量传递 LDFLAGS 来避免引号问题
-        # 3. 此处使用更简单的 LDFLAGS，避免过度转义问题
-        if [ "$ARCH" = "aarch64" ]; then
-            # 对于 ARM64 (QEMU)，简化 LDFLAGS，直接传递给 configure 
-            # 注意：在 QEMU 环境中，复杂的 Shell 转义容易出错
-            CONFIGURE_OPTS="$CONFIGURE_OPTS LDFLAGS=-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
-        else
-            # 对于 x86_64 原生环境，使用环境变量传递 LDFLAGS 更安全
-            export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
-        fi
-
-        # Enable LTO only if NOT Linux ARM64 (QEMU环境下LTO也会导致crash)
-        if [ "$ARCH" != "aarch64" ]; then
-             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-lto"
-        fi
-        
-        # 使用 --enable-shared 时必须指定 RPATH
-        # 使用 $ORIGIN 使其可移植（相对路径）
-        # Correctly escape $ORIGIN for configure -> Makefile -> shell -> compiler
-        
+        CONFIGURE_OPTS="$CONFIGURE_OPTS --enable-shared --with-lto"
+        # 使用 RPATH 确保可执行文件能找到共享库
+        # 通过环境变量传递 LDFLAGS 避免复杂的 shell 转义问题
+        export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
         if [ "$PYTHON_MAJOR" = "3" ]; then
             CONFIGURE_OPTS="$CONFIGURE_OPTS --with-ssl"
         fi
