@@ -53,21 +53,23 @@ cd "Python-$PYTHON_VERSION"
 echo "Configuring build..."
 CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
 
-# Special handling for Linux ARM64 Python 2.7 to avoid GCC segfaults in QEMU
+# 配置编译选项
+echo "Configuring build..."
+CONFIGURE_OPTS="--prefix=$INSTALL_DIR --enable-optimizations"
+
+# Special handling for Linux ARM64 to avoid GCC segfaults in QEMU
 # "gcc: internal compiler error: Segmentation fault" happens with PGO/LTO enabled
-if [ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ] && [ "$PYTHON_MAJOR" = "2" ]; then
-    echo "NOTICE: Disabling PGO and LTO for Python 2.7 on Linux ARM64 to prevent compiler crash"
-    # Remove --enable-optimizations
+# This affects BOTH Python 2 and Python 3 when compiled under QEMU aarch64 emulation
+if [ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ]; then
+    echo "NOTICE: Disabling PGO (--enable-optimizations) and LTO for Linux ARM64 (QEMU) to prevent compiler crash"
     CONFIGURE_OPTS="--prefix=$INSTALL_DIR"
     
-    # Pre-set configure cache variables via a config.cache file
-    # QEMU often fails to run configure test programs (AC_CHECK_SIZEOF etc.)
-    # because it cannot execute the compiled binaries properly.
-    # Using a cache file is the most reliable way to feed these values to old autoconf.
-    # These values are correct for Linux aarch64 (64-bit LP64).
-    echo "NOTICE: Creating configure cache file for QEMU aarch64 compatibility"
-    CACHE_FILE="$BUILD_DIR/Python-$PYTHON_VERSION/config.cache"
-    cat > "$CACHE_FILE" << 'CACHE_EOF'
+    if [ "$PYTHON_MAJOR" = "2" ]; then
+        # Pre-set configure cache variables via a config.cache file
+        # Python 2.7's old autoconf cannot run test programs under QEMU
+        echo "NOTICE: Creating configure cache file for QEMU aarch64 compatibility"
+        CACHE_FILE="$BUILD_DIR/Python-$PYTHON_VERSION/config.cache"
+        cat > "$CACHE_FILE" << 'CACHE_EOF'
 ac_cv_sizeof_pid_t=${ac_cv_sizeof_pid_t=4}
 ac_cv_sizeof_long=${ac_cv_sizeof_long=8}
 ac_cv_sizeof_int=${ac_cv_sizeof_int=4}
@@ -91,7 +93,8 @@ ac_cv_buggy_getaddrinfo=${ac_cv_buggy_getaddrinfo=no}
 ac_cv_file__dev_ptmx=${ac_cv_file__dev_ptmx=yes}
 ac_cv_file__dev_ptc=${ac_cv_file__dev_ptc=no}
 CACHE_EOF
-    CONFIGURE_OPTS="$CONFIGURE_OPTS --cache-file=$CACHE_FILE"
+        CONFIGURE_OPTS="$CONFIGURE_OPTS --cache-file=$CACHE_FILE"
+    fi
 fi
 
 # 针对不同操作系统的特殊配置
@@ -114,8 +117,8 @@ case "$OS_TYPE" in
             export LDFLAGS="-Wl,-rpath=\\\$\$ORIGIN/../lib,-rpath=$INSTALL_DIR/lib"
         fi
 
-        # Enable LTO only if NOT (Linux ARM64 + Python 2.7)
-        if ! ([ "$OS_TYPE" = "Linux" ] && [ "$ARCH" = "aarch64" ] && [ "$PYTHON_MAJOR" = "2" ]); then
+        # Enable LTO only if NOT Linux ARM64 (QEMU环境下LTO也会导致crash)
+        if [ "$ARCH" != "aarch64" ]; then
              CONFIGURE_OPTS="$CONFIGURE_OPTS --with-lto"
         fi
         

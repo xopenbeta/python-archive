@@ -42,21 +42,20 @@ jobs:
             arch: aarch64
             python_version: '3.13.1'
             
-          # --- macOS x64 (Intel) ---
-          # GitHub Actions no longer provides macOS 12 (deprecated Dec 2024)
-          # We must use macos-13 (Intel 最后的堡垒)
-          # 如果 macos-13 调度慢，是因为它是仅存的 Intel 资源，需求量大
-          - os: macos-13
+          # --- macOS x64 (via Rosetta 2 on ARM64 runner) ---
+          # GitHub 已淘汰所有 Intel macOS 运行器 (macos-12/13)
+          # 使用 macos-latest (ARM64) + Rosetta 2 模拟 x86_64
+          - os: macos-latest
             os-name: 'macos'
             arch: x86_64
             python_version: '2.7.18'
-          - os: macos-13
+          - os: macos-latest
             os-name: 'macos'
             arch: x86_64
             python_version: '3.13.1'
             
           # --- macOS ARM64 (Apple Silicon) ---
-          - os: macos-latest # Currently macos-14
+          - os: macos-latest
             os-name: 'macos'
             arch: arm64
             python_version: '2.7.18'
@@ -118,6 +117,12 @@ jobs:
       - name: Set up dependencies (macOS)
         if: matrix.os-name == 'macos'
         run: |
+          # 对于 x86_64 构建，先安装 Rosetta 2
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            echo "Installing Rosetta 2 for x86_64 emulation..."
+            sudo softwareupdate --install-rosetta --agree-to-license || true
+          fi
+          
           brew install readline sqlite3 xz zlib tcl-tk
           if [[ "${{ matrix.python_version }}" == 2.* ]]; then
             brew install openssl@1.1
@@ -137,7 +142,13 @@ jobs:
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          bash ./scripts/build-python.sh ${{ matrix.python_version }}
+          # macOS x86_64：通过 Rosetta 2 运行整个构建
+          if [[ "${{ matrix.os-name }}" == "macos" && "${{ matrix.arch }}" == "x86_64" ]]; then
+            echo "Building under Rosetta 2 (arch -x86_64)..."
+            arch -x86_64 bash ./scripts/build-python.sh ${{ matrix.python_version }}
+          else
+            bash ./scripts/build-python.sh ${{ matrix.python_version }}
+          fi
 
       - name: Create archive (Native/Standard)
         if: "! (matrix.os-name == 'linux' && matrix.arch == 'aarch64')"
