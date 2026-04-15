@@ -32,10 +32,10 @@
 
 ```bash
 # 创建版本标签
-git tag -a v202602121248
+git tag v202604151148
 
 # 推送标签触发 CI/CD
-git push origin v202602121248
+git push origin v202604151148
 ```
 
 ### 方法 2: 手动触发

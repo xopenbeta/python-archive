@@ -95,6 +95,12 @@ case "$OS_TYPE" in
                 CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/usr/local/opt/openssl@1.1"
             elif [ -d "/opt/homebrew/opt/openssl@1.1" ]; then
                 CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/opt/homebrew/opt/openssl@1.1"
+            elif [ -d "/usr/local/opt/openssl@3" ]; then
+                echo "Warning: openssl@1.1 not found, falling back to openssl@3 for Python 2.7"
+                CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/usr/local/opt/openssl@3"
+            elif [ -d "/opt/homebrew/opt/openssl@3" ]; then
+                echo "Warning: openssl@1.1 not found, falling back to openssl@3 for Python 2.7"
+                CONFIGURE_OPTS="$CONFIGURE_OPTS --with-openssl=/opt/homebrew/opt/openssl@3"
             fi
         else
             # 查找 OpenSSL (Python 3)

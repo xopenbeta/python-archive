@@ -65,6 +65,13 @@ jobs:
             python_version: '3.13.1'
             
           # --- Windows x64 ---
+          # Python 2.7 无法在现代 CI 上从源码编译（需要 VS2008）
+          # 改用 python.org 官方预编译 MSI 安装包提取
+          - os: windows-latest
+            os-name: 'windows'
+            arch: x86_64
+            python_version: '2.7.18'
+            use_prebuilt: true
           - os: windows-latest
             os-name: 'windows'
             arch: x86_64
@@ -106,7 +113,10 @@ jobs:
             BREW_X86="/usr/local/bin/brew"
             arch -x86_64 $BREW_X86 install readline sqlite3 xz zlib tcl-tk
             if [[ "${{ matrix.python_version }}" == 2.* ]]; then
-              arch -x86_64 $BREW_X86 install openssl@1.1
+              if ! arch -x86_64 $BREW_X86 install openssl@1.1; then
+                echo "openssl@1.1 is unavailable on current Homebrew, falling back to openssl@3"
+                arch -x86_64 $BREW_X86 install openssl@3
+              fi
             else
               arch -x86_64 $BREW_X86 install openssl@3
             fi
@@ -114,7 +124,10 @@ jobs:
             # ARM64 原生构建，使用默认 Homebrew
             brew install readline sqlite3 xz zlib tcl-tk
             if [[ "${{ matrix.python_version }}" == 2.* ]]; then
-              brew install openssl@1.1
+              if ! brew install openssl@1.1; then
+                echo "openssl@1.1 is unavailable on current Homebrew, falling back to openssl@3"
+                brew install openssl@3
+              fi
             else
               brew install openssl@3
             fi
@@ -126,7 +139,46 @@ jobs:
         run: |
           which msbuild.exe || where.exe msbuild || echo "MSBuild not found"
 
+      # Windows + Python 2.7：从 python.org 下载官方预编译 MSI 并提取
+      # 原因：Python 2.7 需要 Visual Studio 2008 (VC9) 从源码编译，
+      #       现代 CI runner 使用 VS2022，无法编译 Python 2.7 源码。
+      - name: Download prebuilt Python 2.7 (Windows)
+        if: matrix.os-name == 'windows' && startsWith(matrix.python_version, '2.')
+        shell: powershell
+        run: |
+          $version = "${{ matrix.python_version }}"
+          $distDir = "dist\python-$version"
+          New-Item -ItemType Directory -Force -Path $distDir
+
+          # 下载官方 Python 2.7.18 Windows x64 MSI
+          $msiUrl = "https://www.python.org/ftp/python/$version/python-$version.amd64.msi"
+          $msiPath = "$env:TEMP\python-$version.amd64.msi"
+          Write-Host "Downloading $msiUrl ..."
+          Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+
+          # 使用 admin install (/a) 将 MSI 内容提取到目标目录
+          # /a 模式不会写入注册表，生成可移植的文件树
+          $targetDir = (Resolve-Path $distDir).Path
+          Write-Host "Extracting to $targetDir ..."
+          $proc = Start-Process msiexec -ArgumentList "/a `"$msiPath`" TARGETDIR=`"$targetDir`" /quiet /qn /norestart" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "msiexec /a failed with exit code $($proc.ExitCode)"
+            exit 1
+          }
+
+          # 验证 python.exe 是否存在
+          if (-not (Test-Path "$targetDir\python.exe")) {
+            Write-Error "python.exe not found in $targetDir after extraction"
+            Get-ChildItem $targetDir -Recurse | Select-Object FullName | Head -30
+            exit 1
+          }
+
+          Write-Host "Python 2.7 extraction successful:"
+          Get-ChildItem $targetDir | Select-Object Name, Length
+
       - name: Build Python
+        # Windows + Python 2.7 使用上方预编译步骤，跳过从源码编译
+        if: "!(matrix.os-name == 'windows' && startsWith(matrix.python_version, '2.'))"
         shell: bash
         env:
           TARGET_ARCH: ${{ matrix.arch }}
