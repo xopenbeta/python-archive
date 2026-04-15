@@ -193,7 +193,28 @@ case "$OS_TYPE" in
             echo "Error: Failed to copy build artifacts"
             exit 1
         }
-        
+
+        # 关键修复：复制 Python 标准库
+        # 缺少 Lib/ 会导致 "No module named 'encodings'" 等启动错误
+        echo "Copying Python standard library (Lib/)..."
+        cp -r Lib "$INSTALL_DIR/Lib"
+
+        # 将 .pyd 扩展模块移到 DLLs/ 目录（匹配官方 Python Windows 目录布局）
+        echo "Organizing extension modules into DLLs/..."
+        mkdir -p "$INSTALL_DIR/DLLs"
+        find "$INSTALL_DIR" -maxdepth 1 -name "*.pyd" -exec mv {} "$INSTALL_DIR/DLLs/" \; 2>/dev/null || true
+
+        # 创建 ._pth 文件以便携模式运行，无需注册表即可正确设置 sys.path
+        # 文件名格式：python{MAJOR}{MINOR}._pth，例如 python313._pth
+        PYTHON_VER_NODOT="$(echo "$PYTHON_VERSION" | awk -F. '{print $1$2}')"
+        cat > "$INSTALL_DIR/python${PYTHON_VER_NODOT}._pth" << 'PTHEOF'
+.
+Lib
+DLLs
+import site
+PTHEOF
+        echo "Created python${PYTHON_VER_NODOT}._pth for portable mode"
+
         echo "Python $PYTHON_VERSION built successfully for Windows"
         exit 0
         ;;
